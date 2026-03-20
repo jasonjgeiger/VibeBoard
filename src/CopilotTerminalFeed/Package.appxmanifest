@@ -15,7 +15,7 @@
   <Properties>
     <DisplayName>Copilot Terminal Feed</DisplayName>
     <PublisherDisplayName>CopilotTerminalFeed</PublisherDisplayName>
-    <Logo>Assets\StoreLogo.png</Logo>
+    <Logo>Assets\StoreLogo.svg</Logo>
   </Properties>
 
   <Dependencies>
@@ -35,9 +35,9 @@
         DisplayName="Copilot Terminal Feed"
         Description="Terminal feed for Windows Widget Board"
         BackgroundColor="transparent"
-        Square150x150Logo="Assets\Square150x150Logo.png"
-        Square44x44Logo="Assets\Square44x44Logo.png">
-        <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png" />
+        Square150x150Logo="Assets\Square150x150Logo.svg"
+        Square44x44Logo="Assets\Square44x44Logo.svg">
+        <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.svg" />
       </uap:VisualElements>
 
       <Extensions>
@@ -59,7 +59,7 @@
             <uap3:Properties>
               <FeedProvider>
                 <ProviderIcons>
-                  <Icon Path="Assets\FeedIcon.png" />
+                  <Icon Path="Assets\FeedIcon.svg" />
                 </ProviderIcons>
                 <Activation>
                   <CreateInstance ClassId="BF483014-A3C5-4D64-9553-F13714B2D196" />

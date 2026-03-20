@@ -6,7 +6,8 @@ namespace CopilotTerminalFeed;
 
 /// <summary>
 /// Implements IFeedProvider to supply a terminal feed card to the Windows Widget Board.
-/// The feed content is an iframe pointing to the local terminal server's xterm.js UI.
+/// The feed content is an iframe pointing to the local terminal server's xterm.js UI,
+/// authenticated with a per-session token.
 /// </summary>
 public sealed class TerminalFeedProvider : IFeedProvider
 {
@@ -19,9 +20,6 @@ public sealed class TerminalFeedProvider : IFeedProvider
         _server = server;
     }
 
-    /// <summary>
-    /// Called when the Widget Board activates this feed provider.
-    /// </summary>
     public void OnFeedProviderEnabled(FeedProviderEnabledArgs args)
     {
         _providerInfo = args.FeedProviderInfo;
@@ -29,19 +27,12 @@ public sealed class TerminalFeedProvider : IFeedProvider
         Console.WriteLine($"Feed provider enabled: {_providerInfo.Id}");
     }
 
-    /// <summary>
-    /// Called when the Widget Board deactivates this feed provider.
-    /// </summary>
     public void OnFeedProviderDisabled(FeedProviderDisabledArgs args)
     {
         _enabled = false;
         Console.WriteLine("Feed provider disabled");
     }
 
-    /// <summary>
-    /// Called when the Widget Board requests feed content.
-    /// Returns an Adaptive Card with a ContentUri pointing to the local terminal page.
-    /// </summary>
     public void OnFeedEnabled(FeedEnabledArgs args)
     {
         Console.WriteLine("Feed enabled, preparing terminal card");
@@ -53,22 +44,25 @@ public sealed class TerminalFeedProvider : IFeedProvider
         Console.WriteLine("Feed disabled");
     }
 
-    /// <summary>
-    /// Handles custom actions from the feed card (e.g., button clicks).
-    /// </summary>
     public void OnCustomQueryReceived(CustomQueryReceivedArgs args)
     {
         var query = args.CustomQueryData;
         Console.WriteLine($"Custom query received: {query}");
 
-        // Handle terminal commands like launching specific shells
-        if (query.Contains("launch_claude"))
+        try
         {
-            _server.CreateSession("claude");
+            if (query.Contains("launch_claude"))
+            {
+                _server.CreateSession("claude");
+            }
+            else if (query.Contains("launch_copilot"))
+            {
+                _server.CreateSession("gh copilot");
+            }
         }
-        else if (query.Contains("launch_copilot"))
+        catch (Exception ex)
         {
-            _server.CreateSession("gh copilot");
+            Console.Error.WriteLine($"Failed to handle custom query: {ex.Message}");
         }
     }
 
@@ -76,8 +70,7 @@ public sealed class TerminalFeedProvider : IFeedProvider
     {
         if (!_enabled || _providerInfo is null) return;
 
-        // Build the Adaptive Card JSON that embeds the terminal via ContentUri
-        var terminalUrl = $"http://localhost:{_server.Port}/terminal";
+        var terminalUrl = _server.TerminalUrl;
         var adaptiveCardJson = BuildAdaptiveCard(terminalUrl);
 
         var update = new FeedUpdateRequestOptions(_providerInfo.Id)
@@ -106,7 +99,7 @@ public sealed class TerminalFeedProvider : IFeedProvider
                             "items": [
                                 {
                                     "type": "TextBlock",
-                                    "text": "⌨ Copilot Terminal",
+                                    "text": "Copilot Terminal",
                                     "weight": "Bolder",
                                     "size": "Medium"
                                 }

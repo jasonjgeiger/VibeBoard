@@ -14,17 +14,21 @@ public static class Program
     [STAThread]
     public static async Task Main(string[] args)
     {
+        // Load config (from %LOCALAPPDATA%\CopilotTerminalFeed\config.json if it exists)
+        var config = ServerConfig.Load();
+
         ComWrappersSupport.InitializeComWrappers();
 
         // Start the local HTTP + WebSocket terminal server
-        var server = new TerminalServer();
+        var server = new TerminalServer(config.Port, config);
         var serverTask = server.StartAsync();
 
         // Register the feed provider with the Widget Board
         var provider = new TerminalFeedProvider(server);
         FeedManager.GetDefault().Register(provider);
 
-        Console.WriteLine($"CopilotTerminalFeed running. Terminal server on port {server.Port}");
+        Console.WriteLine($"CopilotTerminalFeed running.");
+        Console.WriteLine($"Terminal URL: {server.TerminalUrl}");
 
         // Keep the process alive until signalled to exit
         var exitEvent = new ManualResetEventSlim(false);

@@ -12,6 +12,8 @@ html, body {
   color: #cdd6f4;
 }
 
+/* ── Toolbar ─────────────────────────────────── */
+
 #toolbar {
   display: flex;
   align-items: center;
@@ -49,17 +51,94 @@ html, body {
   color: #cdd6f4;
 }
 
-.cmd-btn.active {
-  background: #89b4fa;
-  color: #1e1e2e;
-  border-color: #89b4fa;
+/* ── Tab bar ─────────────────────────────────── */
+
+#tab-bar {
+  display: flex;
+  align-items: stretch;
+  height: 28px;
+  background: #11111b;
+  border-bottom: 1px solid #313244;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
+#tab-bar::-webkit-scrollbar {
+  height: 2px;
+}
+
+#tab-bar::-webkit-scrollbar-thumb {
+  background: #45475a;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  font-size: 11px;
+  color: #6c7086;
+  border-right: 1px solid #313244;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.1s, color 0.1s;
+}
+
+.tab:hover {
+  background: #1e1e2e;
+  color: #bac2de;
+}
+
+.tab.active {
+  background: #1e1e2e;
+  color: #cdd6f4;
+  border-bottom: 2px solid #89b4fa;
+}
+
+.tab-label {
+  pointer-events: none;
+}
+
+.tab-close {
+  font-size: 14px;
+  line-height: 1;
+  color: #585b70;
+  cursor: pointer;
+  padding: 0 2px;
+  border-radius: 2px;
+}
+
+.tab-close:hover {
+  color: #f38ba8;
+  background: #313244;
+}
+
+.tab-add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  font-size: 16px;
+  color: #585b70;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.tab-add:hover {
+  color: #a6e3a1;
+  background: #1e1e2e;
+}
+
+/* ── Terminal ────────────────────────────────── */
+
 #terminal-container {
-  height: calc(100% - 36px - 24px);
+  position: relative;
+  height: calc(100% - 36px - 28px - 24px);
   padding: 4px;
   background: #1e1e2e;
 }
+
+/* ── Status bar ──────────────────────────────── */
 
 #status-bar {
   display: flex;

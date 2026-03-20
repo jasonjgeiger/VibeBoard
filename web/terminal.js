@@ -1,30 +1,40 @@
 /**
  * CopilotTerminalFeed — xterm.js terminal client
  *
- * Connects to the local TerminalServer via WebSocket and bridges
- * keyboard input / terminal output through a ConPTY session.
+ * Features:
+ *   - Session tabs (multiple concurrent terminals)
+ *   - WebSocket reconnection with exponential backoff
+ *   - Auth token from URL query param, forwarded on API/WS requests
+ *   - Graceful error messages for missing commands
  */
 (function () {
   'use strict';
 
-  const BASE_URL = window.location.origin;
-  const statusText = document.getElementById('status-text');
-  const sessionIdEl = document.getElementById('session-id');
-  const container = document.getElementById('terminal-container');
+  var BASE_URL = window.location.origin;
+  var AUTH_TOKEN = new URLSearchParams(window.location.search).get('token') || '';
+  var statusText = document.getElementById('status-text');
+  var sessionIdEl = document.getElementById('session-id');
+  var container = document.getElementById('terminal-container');
+  var tabBar = document.getElementById('tab-bar');
 
-  let terminal = null;
-  let fitAddon = null;
-  let ws = null;
-  let currentSessionId = null;
+  var sessions = {};       // { id: { terminal, fitAddon, ws, command, reconnectAttempts, reconnectTimer } }
+  var activeSessionId = null;
+  var tabCounter = 0;
 
-  // ── Terminal setup ──────────────────────────────────────────────
+  // ── Auth helpers ────────────────────────────────────────────────
+
+  function authHeaders() {
+    return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + AUTH_TOKEN };
+  }
+
+  function authQueryParam() {
+    return 'token=' + encodeURIComponent(AUTH_TOKEN);
+  }
+
+  // ── Terminal creation ───────────────────────────────────────────
 
   function createTerminal() {
-    if (terminal) {
-      terminal.dispose();
-    }
-
-    terminal = new window.Terminal({
+    var term = new window.Terminal({
       cursorBlink: true,
       cursorStyle: 'bar',
       fontSize: 14,
@@ -54,113 +64,247 @@
       allowProposedApi: true,
     });
 
-    fitAddon = new window.FitAddon.FitAddon();
-    terminal.loadAddon(fitAddon);
-    terminal.loadAddon(new window.WebLinksAddon.WebLinksAddon());
+    var fit = new window.FitAddon.FitAddon();
+    term.loadAddon(fit);
+    term.loadAddon(new window.WebLinksAddon.WebLinksAddon());
 
-    terminal.open(container);
-    fitAddon.fit();
-
-    // Forward keyboard input to the server
-    terminal.onData(function (data) {
-      sendInput(data);
-    });
-
-    // Handle resize
-    terminal.onResize(function (size) {
-      sendResize(size.cols, size.rows);
-    });
-
-    window.addEventListener('resize', function () {
-      if (fitAddon) fitAddon.fit();
-    });
-
-    return terminal;
+    return { terminal: term, fitAddon: fit };
   }
 
   // ── Session management ──────────────────────────────────────────
 
-  async function startSession(command) {
-    setStatus('Connecting...', '');
+  function startSession(command) {
+    setStatus('Creating session...', '');
 
-    // Close existing WebSocket
-    if (ws) {
-      ws.close();
-      ws = null;
-    }
+    fetch(BASE_URL + '/api/session', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ command: command }),
+    })
+      .then(function (resp) {
+        if (!resp.ok) return resp.json().then(function (d) { throw new Error(d.error || 'HTTP ' + resp.status); });
+        return resp.json();
+      })
+      .then(function (data) {
+        var id = data.sessionId;
+        var pair = createTerminal();
 
-    try {
-      const resp = await fetch(BASE_URL + '/api/session', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ command: command }),
+        var session = {
+          id: id,
+          command: command,
+          terminal: pair.terminal,
+          fitAddon: pair.fitAddon,
+          ws: null,
+          reconnectAttempts: 0,
+          reconnectTimer: null,
+          wsUrl: data.wsUrl,
+          exited: false,
+        };
+
+        sessions[id] = session;
+
+        // Wire up keyboard input
+        pair.terminal.onData(function (d) { sendInput(session, d); });
+        pair.terminal.onResize(function (size) { sendResize(session, size.cols, size.rows); });
+
+        addTab(id, command);
+        switchToSession(id);
+        connectWebSocket(session);
+      })
+      .catch(function (err) {
+        setStatus(err.message, 'error');
+        // Show error in active terminal if any
+        if (activeSessionId && sessions[activeSessionId]) {
+          sessions[activeSessionId].terminal.writeln('\r\n\x1b[31mError: ' + err.message + '\x1b[0m');
+        }
       });
+  }
 
-      if (!resp.ok) {
-        throw new Error('Failed to create session: ' + resp.status);
-      }
+  function destroySession(id) {
+    var session = sessions[id];
+    if (!session) return;
 
-      const data = await resp.json();
-      currentSessionId = data.sessionId;
-      sessionIdEl.textContent = currentSessionId;
+    if (session.reconnectTimer) clearTimeout(session.reconnectTimer);
+    if (session.ws) { session.ws.onclose = null; session.ws.close(); }
+    session.terminal.dispose();
+    delete sessions[id];
 
-      // Connect WebSocket
-      connectWebSocket(data.wsUrl);
-    } catch (err) {
-      setStatus(err.message, 'error');
-      terminal.writeln('\r\n\x1b[31mError: ' + err.message + '\x1b[0m');
+    // Tell server to clean up
+    fetch(BASE_URL + '/api/session/destroy', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ sessionId: id }),
+    }).catch(function () {});
+
+    removeTab(id);
+
+    // Switch to another session or show empty state
+    var remaining = Object.keys(sessions);
+    if (remaining.length > 0) {
+      switchToSession(remaining[remaining.length - 1]);
+    } else {
+      activeSessionId = null;
+      container.innerHTML = '';
+      setStatus('No sessions', '');
+      sessionIdEl.textContent = '';
     }
   }
 
-  function connectWebSocket(url) {
-    ws = new WebSocket(url);
+  function switchToSession(id) {
+    var session = sessions[id];
+    if (!session) return;
 
-    ws.onopen = function () {
-      setStatus('Connected', 'connected');
-      // Send initial size
-      if (terminal) {
-        sendResize(terminal.cols, terminal.rows);
-      }
+    // Hide all terminals
+    Object.keys(sessions).forEach(function (sid) {
+      var el = sessions[sid].terminal.element;
+      if (el) el.style.display = 'none';
+    });
+
+    activeSessionId = id;
+
+    // If terminal not yet attached, attach it
+    if (!session.terminal.element) {
+      session.terminal.open(container);
+    }
+    session.terminal.element.style.display = '';
+    session.fitAddon.fit();
+    session.terminal.focus();
+
+    // Update tab active state
+    tabBar.querySelectorAll('.tab').forEach(function (t) {
+      t.classList.toggle('active', t.dataset.session === id);
+    });
+
+    sessionIdEl.textContent = id;
+    setStatus(session.ws && session.ws.readyState === WebSocket.OPEN ? 'Connected' : 'Disconnected',
+              session.ws && session.ws.readyState === WebSocket.OPEN ? 'connected' : '');
+  }
+
+  // ── WebSocket with reconnection ─────────────────────────────────
+
+  var MAX_RECONNECT_ATTEMPTS = 8;
+  var BASE_RECONNECT_DELAY = 500; // ms
+
+  function connectWebSocket(session) {
+    if (session.exited) return;
+
+    var url = session.wsUrl;
+    session.ws = new WebSocket(url);
+
+    session.ws.onopen = function () {
+      session.reconnectAttempts = 0;
+      if (activeSessionId === session.id) setStatus('Connected', 'connected');
+      sendResize(session, session.terminal.cols, session.terminal.rows);
     };
 
-    ws.onmessage = function (event) {
+    session.ws.onmessage = function (event) {
       try {
         var msg = JSON.parse(event.data);
-
         if (msg.type === 'output') {
-          // Decode base64 output and write to terminal
-          var bytes = atob(msg.data);
-          terminal.write(bytes);
+          var raw = atob(msg.data);
+          // Convert binary string to Uint8Array for proper UTF-8 handling
+          var bytes = new Uint8Array(raw.length);
+          for (var i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+          session.terminal.write(bytes);
         } else if (msg.type === 'exit') {
-          setStatus('Process exited', '');
-          terminal.writeln('\r\n\x1b[33m[Process exited]\x1b[0m');
+          session.exited = true;
+          if (activeSessionId === session.id) setStatus('Process exited', '');
+          session.terminal.writeln('\r\n\x1b[33m[Process exited. Press any key to close tab.]\x1b[0m');
+          session.terminal.onData(function () { destroySession(session.id); });
+        } else if (msg.type === 'error') {
+          session.terminal.writeln('\r\n\x1b[31mServer error: ' + (msg.message || 'unknown') + '\x1b[0m');
         }
       } catch (err) {
         console.error('WebSocket message error:', err);
       }
     };
 
-    ws.onclose = function () {
-      setStatus('Disconnected', '');
+    session.ws.onclose = function () {
+      if (session.exited) return;
+      if (activeSessionId === session.id) setStatus('Disconnected', '');
+      scheduleReconnect(session);
     };
 
-    ws.onerror = function () {
-      setStatus('Connection error', 'error');
+    session.ws.onerror = function () {
+      // onclose will fire after this
     };
+  }
+
+  function scheduleReconnect(session) {
+    if (session.exited || session.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+      if (!session.exited) {
+        session.terminal.writeln('\r\n\x1b[31m[Connection lost. Click to retry.]\x1b[0m');
+        session.terminal.onData(function () {
+          session.reconnectAttempts = 0;
+          connectWebSocket(session);
+        });
+      }
+      return;
+    }
+
+    var delay = BASE_RECONNECT_DELAY * Math.pow(2, session.reconnectAttempts);
+    delay = Math.min(delay, 30000); // cap at 30s
+    session.reconnectAttempts++;
+
+    if (activeSessionId === session.id) {
+      setStatus('Reconnecting (' + session.reconnectAttempts + '/' + MAX_RECONNECT_ATTEMPTS + ')...', '');
+    }
+
+    session.reconnectTimer = setTimeout(function () {
+      connectWebSocket(session);
+    }, delay);
   }
 
   // ── WebSocket messaging ─────────────────────────────────────────
 
-  function sendInput(data) {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'input', data: data }));
+  function sendInput(session, data) {
+    if (session.ws && session.ws.readyState === WebSocket.OPEN) {
+      session.ws.send(JSON.stringify({ type: 'input', data: data }));
     }
   }
 
-  function sendResize(cols, rows) {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'resize', cols: cols, rows: rows }));
+  function sendResize(session, cols, rows) {
+    if (session.ws && session.ws.readyState === WebSocket.OPEN) {
+      session.ws.send(JSON.stringify({ type: 'resize', cols: cols, rows: rows }));
     }
+  }
+
+  // ── Tab bar ─────────────────────────────────────────────────────
+
+  function addTab(id, command) {
+    tabCounter++;
+    var label = command.split(/[\\/]/).pop().split('.')[0]; // "cmd.exe" -> "cmd"
+    if (label === 'gh') label = 'copilot';
+
+    var tab = document.createElement('div');
+    tab.className = 'tab';
+    tab.dataset.session = id;
+    tab.innerHTML = '<span class="tab-label">' + escapeHtml(label) + '</span>' +
+                    '<span class="tab-close" title="Close">&times;</span>';
+
+    tab.querySelector('.tab-label').addEventListener('click', function () {
+      switchToSession(id);
+    });
+
+    tab.querySelector('.tab-close').addEventListener('click', function (e) {
+      e.stopPropagation();
+      destroySession(id);
+    });
+
+    // Insert before the "+" button
+    var addBtn = tabBar.querySelector('.tab-add');
+    tabBar.insertBefore(tab, addBtn);
+  }
+
+  function removeTab(id) {
+    var tab = tabBar.querySelector('.tab[data-session="' + id + '"]');
+    if (tab) tab.remove();
+  }
+
+  function escapeHtml(s) {
+    var d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
   }
 
   // ── UI helpers ──────────────────────────────────────────────────
@@ -170,28 +314,29 @@
     statusText.className = className || '';
   }
 
-  // ── Button handlers ─────────────────────────────────────────────
+  // ── Window resize ───────────────────────────────────────────────
+
+  window.addEventListener('resize', function () {
+    if (activeSessionId && sessions[activeSessionId]) {
+      sessions[activeSessionId].fitAddon.fit();
+    }
+  });
+
+  // ── Toolbar command buttons ─────────────────────────────────────
 
   document.querySelectorAll('.cmd-btn').forEach(function (btn) {
     btn.addEventListener('click', function () {
-      // Update active state
-      document.querySelectorAll('.cmd-btn').forEach(function (b) {
-        b.classList.remove('active');
-      });
-      btn.classList.add('active');
-
-      // Create new terminal and session
-      createTerminal();
       startSession(btn.dataset.command);
     });
   });
 
+  // ── Tab bar "+" button ──────────────────────────────────────────
+
+  document.querySelector('.tab-add').addEventListener('click', function () {
+    startSession('cmd.exe');
+  });
+
   // ── Initialize ──────────────────────────────────────────────────
 
-  createTerminal();
-  terminal.writeln('Copilot Terminal Feed');
-  terminal.writeln('Select a command above or click Shell to start.\r\n');
-
-  // Auto-start a shell session
   startSession('cmd.exe');
 })();
