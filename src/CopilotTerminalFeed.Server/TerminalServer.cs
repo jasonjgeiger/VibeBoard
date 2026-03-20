@@ -19,6 +19,7 @@ public sealed class TerminalServer
     private readonly Timer _cleanupTimer;
     private readonly List<WebSocket> _activeWebSockets = new();
     private readonly object _wsListLock = new();
+    private readonly DateTime _startedAt = DateTime.UtcNow;
 
     /// <summary>Auth token required on all API/WebSocket requests. Passed to the UI via query param.</summary>
     public string AuthToken { get; }
@@ -229,6 +230,10 @@ public sealed class TerminalServer
                     await HandleDestroySessionAsync(context);
                     break;
 
+                case "/api/health":
+                    HandleHealth(response);
+                    break;
+
                 case "/ws":
                     if (context.Request.IsWebSocketRequest)
                     {
@@ -336,6 +341,28 @@ public sealed class TerminalServer
             idleSeconds = (int)(DateTime.UtcNow - kv.Value.LastActivity).TotalSeconds
         });
         var json = JsonSerializer.Serialize(sessions);
+        Respond(response, 200, json, "application/json");
+    }
+
+    private void HandleHealth(HttpListenerResponse response)
+    {
+        int activeWs;
+        lock (_wsListLock) { activeWs = _activeWebSockets.Count; }
+
+        var health = new
+        {
+            status = "ok",
+            uptime = (int)(DateTime.UtcNow - _startedAt).TotalSeconds,
+            sessions = new
+            {
+                total = _sessions.Count,
+                running = _sessions.Values.Count(e => e.Session.IsRunning),
+                exited = _sessions.Values.Count(e => e.HasExited),
+            },
+            activeWebSockets = activeWs,
+            port = Port,
+        };
+        var json = JsonSerializer.Serialize(health);
         Respond(response, 200, json, "application/json");
     }
 

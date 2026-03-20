@@ -6,7 +6,9 @@
  *   - WebSocket reconnection with exponential backoff
  *   - Auth token from URL query param, forwarded on API/WS requests
  *   - Clipboard integration (Ctrl+Shift+C/V)
- *   - Graceful error messages for missing commands
+ *   - In-terminal search (Ctrl+F) via SearchAddon
+ *   - Settings panel (font size, default shell, scrollback, cursor)
+ *   - Session persistence across page reloads
  */
 (function () {
   'use strict';
@@ -22,6 +24,57 @@
   var activeSessionId = null;
   var tabCounter = 0;
 
+  // ── Local settings (persisted to localStorage) ──────────────────
+
+  var SETTINGS_KEY = 'copilot-terminal-settings';
+  var DEFAULT_SETTINGS = {
+    fontSize: 14,
+    defaultShell: 'cmd.exe',
+    scrollback: 5000,
+    cursorStyle: 'bar',
+  };
+
+  function loadSettings() {
+    try {
+      var stored = localStorage.getItem(SETTINGS_KEY);
+      if (stored) {
+        var parsed = JSON.parse(stored);
+        return Object.assign({}, DEFAULT_SETTINGS, parsed);
+      }
+    } catch (e) {}
+    return Object.assign({}, DEFAULT_SETTINGS);
+  }
+
+  function saveSettings(s) {
+    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch (e) {}
+  }
+
+  var settings = loadSettings();
+
+  // ── Session persistence (remember across reloads) ───────────────
+
+  var SESSIONS_KEY = 'copilot-terminal-sessions';
+
+  function persistSessionList() {
+    var list = Object.keys(sessions).map(function (id) {
+      var s = sessions[id];
+      return { id: id, command: s.command, wsUrl: s.wsUrl };
+    });
+    try { localStorage.setItem(SESSIONS_KEY, JSON.stringify(list)); } catch (e) {}
+  }
+
+  function loadPersistedSessions() {
+    try {
+      var stored = localStorage.getItem(SESSIONS_KEY);
+      if (stored) return JSON.parse(stored);
+    } catch (e) {}
+    return [];
+  }
+
+  function clearPersistedSessions() {
+    try { localStorage.removeItem(SESSIONS_KEY); } catch (e) {}
+  }
+
   // ── Auth helpers ────────────────────────────────────────────────
 
   function authHeaders() {
@@ -33,10 +86,10 @@
   function createTerminal() {
     var term = new window.Terminal({
       cursorBlink: true,
-      cursorStyle: 'bar',
-      fontSize: 14,
+      cursorStyle: settings.cursorStyle,
+      fontSize: settings.fontSize,
       fontFamily: "'Cascadia Code', 'Consolas', 'Courier New', monospace",
-      scrollback: 5000,
+      scrollback: settings.scrollback,
       theme: {
         background: '#1e1e2e',
         foreground: '#cdd6f4',
@@ -66,30 +119,75 @@
     term.loadAddon(fit);
     term.loadAddon(new window.WebLinksAddon.WebLinksAddon());
 
+    var search = new window.SearchAddon.SearchAddon();
+    term.loadAddon(search);
+
     // Clipboard: Ctrl+Shift+C to copy, Ctrl+Shift+V to paste
     term.attachCustomKeyEventHandler(function (ev) {
       if (ev.ctrlKey && ev.shiftKey && ev.type === 'keydown') {
         if (ev.key === 'C') {
           var sel = term.getSelection();
-          if (sel) {
-            navigator.clipboard.writeText(sel).catch(function () {});
-          }
+          if (sel) navigator.clipboard.writeText(sel).catch(function () {});
           return false;
         }
         if (ev.key === 'V') {
           navigator.clipboard.readText().then(function (text) {
-            if (text && activeSessionId) {
-              sendInput(sessions[activeSessionId], text);
-            }
+            if (text && activeSessionId) sendInput(sessions[activeSessionId], text);
           }).catch(function () {});
           return false;
         }
       }
+      // Ctrl+F opens search bar (prevent terminal from receiving it)
+      if (ev.ctrlKey && !ev.shiftKey && ev.key === 'f' && ev.type === 'keydown') {
+        openSearchBar();
+        return false;
+      }
       return true;
     });
 
-    return { terminal: term, fitAddon: fit };
+    return { terminal: term, fitAddon: fit, searchAddon: search };
   }
+
+  // ── Search bar ──────────────────────────────────────────────────
+
+  var searchBar = document.getElementById('search-bar');
+  var searchInput = document.getElementById('search-input');
+
+  function openSearchBar() {
+    searchBar.classList.remove('hidden');
+    searchInput.focus();
+    searchInput.select();
+  }
+
+  function closeSearchBar() {
+    searchBar.classList.add('hidden');
+    // Clear search decoration
+    if (activeSessionId && sessions[activeSessionId]) {
+      sessions[activeSessionId].searchAddon.clearDecorations();
+      sessions[activeSessionId].terminal.focus();
+    }
+  }
+
+  function doSearch(direction) {
+    var query = searchInput.value;
+    if (!query || !activeSessionId || !sessions[activeSessionId]) return;
+    var addon = sessions[activeSessionId].searchAddon;
+    if (direction === 'prev') {
+      addon.findPrevious(query);
+    } else {
+      addon.findNext(query);
+    }
+  }
+
+  searchInput.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') { closeSearchBar(); e.preventDefault(); }
+    else if (e.key === 'Enter' && e.shiftKey) { doSearch('prev'); e.preventDefault(); }
+    else if (e.key === 'Enter') { doSearch('next'); e.preventDefault(); }
+  });
+
+  document.getElementById('search-next').addEventListener('click', function () { doSearch('next'); });
+  document.getElementById('search-prev').addEventListener('click', function () { doSearch('prev'); });
+  document.getElementById('search-close').addEventListener('click', closeSearchBar);
 
   // ── Session management ──────────────────────────────────────────
 
@@ -106,30 +204,7 @@
         return resp.json();
       })
       .then(function (data) {
-        var id = data.sessionId;
-        var pair = createTerminal();
-
-        var session = {
-          id: id,
-          command: command,
-          terminal: pair.terminal,
-          fitAddon: pair.fitAddon,
-          ws: null,
-          reconnectAttempts: 0,
-          reconnectTimer: null,
-          wsUrl: data.wsUrl,
-          exited: false,
-        };
-
-        sessions[id] = session;
-
-        // Wire up keyboard input
-        pair.terminal.onData(function (d) { sendInput(session, d); });
-        pair.terminal.onResize(function (size) { sendResize(session, size.cols, size.rows); });
-
-        addTab(id, command);
-        switchToSession(id);
-        connectWebSocket(session);
+        attachSession(data.sessionId, command, data.wsUrl, true);
       })
       .catch(function (err) {
         setStatus(err.message, 'error');
@@ -137,6 +212,34 @@
           sessions[activeSessionId].terminal.writeln('\r\n\x1b[31mError: ' + err.message + '\x1b[0m');
         }
       });
+  }
+
+  function attachSession(id, command, wsUrl, isNew) {
+    var pair = createTerminal();
+
+    var session = {
+      id: id,
+      command: command,
+      terminal: pair.terminal,
+      fitAddon: pair.fitAddon,
+      searchAddon: pair.searchAddon,
+      ws: null,
+      reconnectAttempts: 0,
+      reconnectTimer: null,
+      wsUrl: wsUrl,
+      exited: false,
+    };
+
+    sessions[id] = session;
+
+    pair.terminal.onData(function (d) { sendInput(session, d); });
+    pair.terminal.onResize(function (size) { sendResize(session, size.cols, size.rows); });
+
+    addTab(id, command);
+    switchToSession(id);
+    connectWebSocket(session);
+
+    persistSessionList();
   }
 
   function destroySession(id) {
@@ -155,6 +258,7 @@
     }).catch(function () {});
 
     removeTab(id);
+    persistSessionList();
 
     var remaining = Object.keys(sessions);
     if (remaining.length > 0) {
@@ -171,7 +275,6 @@
     var session = sessions[id];
     if (!session) return;
 
-    // Hide all terminals
     Object.keys(sessions).forEach(function (sid) {
       var el = sessions[sid].terminal.element;
       if (el) el.style.display = 'none';
@@ -186,7 +289,6 @@
     session.fitAddon.fit();
     session.terminal.focus();
 
-    // Update tab active state
     tabBar.querySelectorAll('.tab').forEach(function (t) {
       t.classList.toggle('active', t.dataset.session === id);
     });
@@ -318,6 +420,51 @@
     return d.innerHTML;
   }
 
+  // ── Settings panel ──────────────────────────────────────────────
+
+  var settingsOverlay = document.getElementById('settings-overlay');
+
+  function openSettings() {
+    document.getElementById('setting-fontsize').value = settings.fontSize;
+    document.getElementById('setting-shell').value = settings.defaultShell;
+    document.getElementById('setting-scrollback').value = settings.scrollback;
+    document.getElementById('setting-cursor').value = settings.cursorStyle;
+    settingsOverlay.classList.remove('hidden');
+  }
+
+  function closeSettings() {
+    settingsOverlay.classList.add('hidden');
+    if (activeSessionId && sessions[activeSessionId]) {
+      sessions[activeSessionId].terminal.focus();
+    }
+  }
+
+  function applySettings() {
+    settings.fontSize = parseInt(document.getElementById('setting-fontsize').value, 10) || 14;
+    settings.defaultShell = document.getElementById('setting-shell').value;
+    settings.scrollback = parseInt(document.getElementById('setting-scrollback').value, 10) || 5000;
+    settings.cursorStyle = document.getElementById('setting-cursor').value;
+    saveSettings(settings);
+
+    // Apply to all existing terminals
+    Object.keys(sessions).forEach(function (id) {
+      var term = sessions[id].terminal;
+      term.options.fontSize = settings.fontSize;
+      term.options.cursorStyle = settings.cursorStyle;
+      sessions[id].fitAddon.fit();
+    });
+
+    closeSettings();
+  }
+
+  document.getElementById('btn-settings').addEventListener('click', openSettings);
+  document.getElementById('settings-close').addEventListener('click', closeSettings);
+  document.getElementById('settings-save').addEventListener('click', applySettings);
+
+  settingsOverlay.addEventListener('click', function (e) {
+    if (e.target === settingsOverlay) closeSettings();
+  });
+
   // ── UI helpers ──────────────────────────────────────────────────
 
   function setStatus(text, className) {
@@ -335,7 +482,7 @@
 
   // ── Toolbar command buttons ─────────────────────────────────────
 
-  document.querySelectorAll('.cmd-btn').forEach(function (btn) {
+  document.querySelectorAll('.cmd-btn[data-command]').forEach(function (btn) {
     btn.addEventListener('click', function () {
       startSession(btn.dataset.command);
     });
@@ -344,23 +491,56 @@
   // ── Tab bar "+" button ──────────────────────────────────────────
 
   document.querySelector('.tab-add').addEventListener('click', function () {
-    startSession('cmd.exe');
+    startSession(settings.defaultShell);
   });
 
-  // ── Keyboard shortcut: Ctrl+T for new tab ───────────────────────
+  // ── Keyboard shortcuts ──────────────────────────────────────────
 
   document.addEventListener('keydown', function (e) {
     if (e.ctrlKey && e.key === 't') {
       e.preventDefault();
-      startSession('cmd.exe');
+      startSession(settings.defaultShell);
     }
     if (e.ctrlKey && e.key === 'w') {
       e.preventDefault();
       if (activeSessionId) destroySession(activeSessionId);
     }
+    if (e.key === 'Escape') {
+      if (!searchBar.classList.contains('hidden')) closeSearchBar();
+      if (!settingsOverlay.classList.contains('hidden')) closeSettings();
+    }
   });
 
   // ── Initialize ──────────────────────────────────────────────────
 
-  startSession('cmd.exe');
+  // Try to reconnect to previously active sessions
+  var persisted = loadPersistedSessions();
+  if (persisted.length > 0) {
+    // Verify sessions still exist on the server before reconnecting
+    fetch(BASE_URL + '/api/sessions', { headers: authHeaders() })
+      .then(function (resp) { return resp.json(); })
+      .then(function (serverSessions) {
+        var serverIds = {};
+        serverSessions.forEach(function (s) { serverIds[s.id] = s; });
+
+        var reconnected = false;
+        persisted.forEach(function (p) {
+          if (serverIds[p.id] && serverIds[p.id].running) {
+            attachSession(p.id, p.command, p.wsUrl, false);
+            reconnected = true;
+          }
+        });
+
+        if (!reconnected) {
+          clearPersistedSessions();
+          startSession(settings.defaultShell);
+        }
+      })
+      .catch(function () {
+        clearPersistedSessions();
+        startSession(settings.defaultShell);
+      });
+  } else {
+    startSession(settings.defaultShell);
+  }
 })();

@@ -51,6 +51,11 @@ html, body {
   color: #cdd6f4;
 }
 
+.cmd-btn--icon {
+  font-size: 14px;
+  padding: 2px 8px;
+}
+
 /* ── Tab bar ─────────────────────────────────── */
 
 #tab-bar {
@@ -136,6 +141,130 @@ html, body {
   height: calc(100% - 36px - 28px - 24px);
   padding: 4px;
   background: #1e1e2e;
+}
+
+/* ── Search bar ─────────────────────────────── */
+
+.search-bar {
+  position: absolute;
+  top: 70px;
+  right: 16px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: #313244;
+  border: 1px solid #45475a;
+  border-radius: 6px;
+  padding: 4px 8px;
+  z-index: 100;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.search-bar.hidden {
+  display: none;
+}
+
+.search-bar input {
+  background: #1e1e2e;
+  border: 1px solid #45475a;
+  border-radius: 3px;
+  color: #cdd6f4;
+  font-size: 12px;
+  padding: 3px 8px;
+  width: 200px;
+  outline: none;
+}
+
+.search-bar input:focus {
+  border-color: #89b4fa;
+}
+
+.search-btn {
+  background: none;
+  border: none;
+  color: #6c7086;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+.search-btn:hover {
+  color: #cdd6f4;
+  background: #45475a;
+}
+
+/* ── Settings panel ─────────────────────────── */
+
+.settings-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.settings-overlay.hidden {
+  display: none;
+}
+
+.settings-panel {
+  background: #1e1e2e;
+  border: 1px solid #45475a;
+  border-radius: 10px;
+  width: 340px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid #313244;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.settings-body {
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: #bac2de;
+}
+
+.settings-row input,
+.settings-row select {
+  background: #313244;
+  border: 1px solid #45475a;
+  border-radius: 4px;
+  color: #cdd6f4;
+  font-size: 12px;
+  padding: 4px 8px;
+  width: 140px;
+}
+
+.settings-row input:focus,
+.settings-row select:focus {
+  border-color: #89b4fa;
+  outline: none;
+}
+
+.settings-footer {
+  padding: 12px 16px;
+  border-top: 1px solid #313244;
+  display: flex;
+  justify-content: flex-end;
 }
 
 /* ── Status bar ──────────────────────────────── */

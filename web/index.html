@@ -14,12 +14,62 @@
       <button id="btn-claude" class="cmd-btn" data-command="claude">Claude</button>
       <button id="btn-copilot" class="cmd-btn" data-command="gh copilot">Copilot</button>
       <button id="btn-shell" class="cmd-btn" data-command="cmd.exe">Shell</button>
+      <button id="btn-settings" class="cmd-btn cmd-btn--icon" title="Settings">&#9881;</button>
     </div>
   </div>
   <div id="tab-bar">
-    <div class="tab-add" title="New tab">+</div>
+    <div class="tab-add" title="New tab (Ctrl+T)">+</div>
   </div>
   <div id="terminal-container"></div>
+
+  <!-- Search bar (hidden by default, toggled with Ctrl+F) -->
+  <div id="search-bar" class="search-bar hidden">
+    <input id="search-input" type="text" placeholder="Search..." spellcheck="false" autocomplete="off">
+    <button id="search-prev" class="search-btn" title="Previous (Shift+Enter)">&#9650;</button>
+    <button id="search-next" class="search-btn" title="Next (Enter)">&#9660;</button>
+    <button id="search-close" class="search-btn" title="Close (Esc)">&times;</button>
+  </div>
+
+  <!-- Settings panel (hidden by default) -->
+  <div id="settings-overlay" class="settings-overlay hidden">
+    <div class="settings-panel">
+      <div class="settings-header">
+        <span>Settings</span>
+        <button id="settings-close" class="search-btn">&times;</button>
+      </div>
+      <div class="settings-body">
+        <label class="settings-row">
+          <span>Font Size</span>
+          <input id="setting-fontsize" type="number" min="8" max="32" value="14">
+        </label>
+        <label class="settings-row">
+          <span>Default Shell</span>
+          <select id="setting-shell">
+            <option value="cmd.exe">cmd.exe</option>
+            <option value="powershell.exe">PowerShell</option>
+            <option value="pwsh.exe">PowerShell 7</option>
+            <option value="wsl.exe">WSL</option>
+          </select>
+        </label>
+        <label class="settings-row">
+          <span>Scrollback Lines</span>
+          <input id="setting-scrollback" type="number" min="500" max="50000" step="500" value="5000">
+        </label>
+        <label class="settings-row">
+          <span>Cursor Style</span>
+          <select id="setting-cursor">
+            <option value="bar">Bar</option>
+            <option value="block">Block</option>
+            <option value="underline">Underline</option>
+          </select>
+        </label>
+      </div>
+      <div class="settings-footer">
+        <button id="settings-save" class="cmd-btn">Save</button>
+      </div>
+    </div>
+  </div>
+
   <div id="status-bar">
     <span id="status-text">Disconnected</span>
     <span id="session-id"></span>
@@ -28,6 +78,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-web-links@0.11.0/lib/addon-web-links.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-search@0.15.0/lib/addon-search.min.js"></script>
   <script src="terminal.js"></script>
 </body>
 </html>

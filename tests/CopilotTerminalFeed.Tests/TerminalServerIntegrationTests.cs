@@ -100,6 +100,19 @@ public class TerminalServerIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Health_Endpoint_Returns_Status()
+    {
+        var resp = await _client.GetAsync("/api/health");
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+
+        var body = await resp.Content.ReadAsStringAsync();
+        var doc = JsonDocument.Parse(body);
+        Assert.Equal("ok", doc.RootElement.GetProperty("status").GetString());
+        Assert.True(doc.RootElement.GetProperty("uptime").GetInt32() >= 0);
+        Assert.True(doc.RootElement.GetProperty("sessions").GetProperty("total").GetInt32() >= 0);
+    }
+
+    [Fact]
     public async Task Destroy_Nonexistent_Session_Returns_404()
     {
         var content = new StringContent("{\"sessionId\":\"doesnotexist\"}", Encoding.UTF8, "application/json");
