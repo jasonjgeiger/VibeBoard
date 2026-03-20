@@ -1,0 +1,35 @@
+## .NET
+bin/
+obj/
+*.user
+*.suo
+*.cache
+*.vs/
+.vs/
+*.DotSettings.user
+TestResults/
+BenchmarkDotNet.Artifacts/
+
+## Node
+node_modules/
+dist/
+*.tgz
+
+## Build
+*.nupkg
+AppPackages/
+BundleArtifacts/
+
+## IDE
+.idea/
+*.swp
+*.swo
+*~
+
+## OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+## Logs
+*.log

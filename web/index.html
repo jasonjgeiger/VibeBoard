@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Copilot Terminal</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css">
+  <link rel="stylesheet" href="terminal.css">
+</head>
+<body>
+  <div id="toolbar">
+    <span class="title">Copilot Terminal</span>
+    <div class="actions">
+      <button id="btn-claude" class="cmd-btn" data-command="claude">Claude</button>
+      <button id="btn-copilot" class="cmd-btn" data-command="gh copilot">Copilot</button>
+      <button id="btn-shell" class="cmd-btn active" data-command="cmd.exe">Shell</button>
+    </div>
+  </div>
+  <div id="terminal-container"></div>
+  <div id="status-bar">
+    <span id="status-text">Disconnected</span>
+    <span id="session-id"></span>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-web-links@0.11.0/lib/addon-web-links.min.js"></script>
+  <script src="terminal.js"></script>
+</body>
+</html>
