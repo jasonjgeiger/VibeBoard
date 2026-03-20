@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Net;
+using System.Net.WebSockets;
 using System.Security.Cryptography;
 using System.Text.Json;
 
@@ -16,6 +17,8 @@ public sealed class TerminalServer
     private readonly CancellationTokenSource _cts = new();
     private readonly string _webContentPath;
     private readonly Timer _cleanupTimer;
+    private readonly List<WebSocket> _activeWebSockets = new();
+    private readonly object _wsListLock = new();
 
     /// <summary>Auth token required on all API/WebSocket requests. Passed to the UI via query param.</summary>
     public string AuthToken { get; }
@@ -55,8 +58,8 @@ public sealed class TerminalServer
     public async Task StartAsync()
     {
         _listener.Start();
-        Console.WriteLine($"Terminal server listening on http://localhost:{Port}/");
-        Console.WriteLine($"Auth token: {AuthToken}");
+        Log.Info($"Terminal server listening on http://localhost:{Port}/");
+        Log.Info($"Auth token: {AuthToken}");
 
         while (!_cts.Token.IsCancellationRequested)
         {
@@ -76,10 +79,32 @@ public sealed class TerminalServer
         }
     }
 
-    public Task StopAsync()
+    public async Task StopAsync()
     {
         _cts.Cancel();
         _cleanupTimer.Dispose();
+
+        // Gracefully close all active WebSocket connections
+        List<WebSocket> sockets;
+        lock (_wsListLock)
+        {
+            sockets = new List<WebSocket>(_activeWebSockets);
+            _activeWebSockets.Clear();
+        }
+
+        var closeTasks = sockets
+            .Where(ws => ws.State == WebSocketState.Open)
+            .Select(async ws =>
+            {
+                try
+                {
+                    using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                    await ws.CloseAsync(WebSocketCloseStatus.EndpointUnavailable, "Server shutting down", timeout.Token);
+                }
+                catch { }
+            });
+        await Task.WhenAll(closeTasks);
+
         _listener.Stop();
 
         foreach (var entry in _sessions.Values)
@@ -87,8 +112,6 @@ public sealed class TerminalServer
             entry.Session.Dispose();
         }
         _sessions.Clear();
-
-        return Task.CompletedTask;
     }
 
     /// <summary>
@@ -112,14 +135,14 @@ public sealed class TerminalServer
         catch (Exception ex)
         {
             _sessions.TryRemove(sessionId, out _);
-            Console.Error.WriteLine($"Failed to start session for '{command}': {ex.Message}");
+            Log.Error($"Failed to start session for '{command}'", ex);
             throw;
         }
 
         // Wire up process exit to mark the entry as dead
         session.ProcessExited += () => entry.MarkExited();
 
-        Console.WriteLine($"Created session {sessionId} for command: {resolvedCommand}");
+        Log.Info($"Created session {sessionId} for command: {resolvedCommand}");
         return sessionId;
     }
 
@@ -129,7 +152,7 @@ public sealed class TerminalServer
         if (_sessions.TryRemove(sessionId, out var entry))
         {
             entry.Session.Dispose();
-            Console.WriteLine($"Destroyed session {sessionId}");
+            Log.Info($"Destroyed session {sessionId}");
         }
     }
 
@@ -166,7 +189,6 @@ public sealed class TerminalServer
             }
 
             // Static page (terminal UI) — token checked via query param
-            // API/WS endpoints — token checked via Authorization header or query param
             if (path is "/" or "/terminal")
             {
                 if (!ValidateToken(context, allowQueryParam: true))
@@ -200,7 +222,7 @@ public sealed class TerminalServer
                     break;
 
                 case "/api/sessions":
-                    await HandleListSessionsAsync(response);
+                    HandleListSessions(response);
                     break;
 
                 case "/api/session/destroy":
@@ -227,7 +249,7 @@ public sealed class TerminalServer
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Error handling {path}: {ex.Message}");
+            Log.Error($"Error handling {path}", ex);
             try
             {
                 response.StatusCode = 500;
@@ -304,7 +326,7 @@ public sealed class TerminalServer
         }
     }
 
-    private async Task HandleListSessionsAsync(HttpListenerResponse response)
+    private void HandleListSessions(HttpListenerResponse response)
     {
         var sessions = _sessions.Select(kv => new
         {
@@ -331,11 +353,20 @@ public sealed class TerminalServer
         entry.TouchActivity();
 
         var wsContext = await context.AcceptWebSocketAsync(null);
-        var handler = new WebSocketHandler(wsContext.WebSocket, entry.Session, () => entry.TouchActivity());
-        await handler.RunAsync(_cts.Token);
+        var ws = wsContext.WebSocket;
 
-        // When WebSocket disconnects, mark idle clock start
-        entry.TouchActivity();
+        lock (_wsListLock) { _activeWebSockets.Add(ws); }
+
+        try
+        {
+            var handler = new WebSocketHandler(ws, entry.Session, () => entry.TouchActivity());
+            await handler.RunAsync(_cts.Token);
+        }
+        finally
+        {
+            lock (_wsListLock) { _activeWebSockets.Remove(ws); }
+            entry.TouchActivity();
+        }
     }
 
     private async Task ServeFileAsync(HttpListenerResponse response, string fileName, string contentType)
@@ -411,7 +442,6 @@ public sealed class TerminalServer
     /// </summary>
     private string ResolveCommand(string command)
     {
-        // Check config allowlist if defined
         if (Config.AllowedCommands.Count > 0)
         {
             var baseCmd = command.Split(' ', 2)[0].ToLowerInvariant();

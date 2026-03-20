@@ -27,8 +27,8 @@ public static class Program
         var provider = new TerminalFeedProvider(server);
         FeedManager.GetDefault().Register(provider);
 
-        Console.WriteLine($"CopilotTerminalFeed running.");
-        Console.WriteLine($"Terminal URL: {server.TerminalUrl}");
+        Log.Info($"CopilotTerminalFeed running.");
+        Log.Info($"Terminal URL: {server.TerminalUrl}");
 
         // Keep the process alive until signalled to exit
         var exitEvent = new ManualResetEventSlim(false);

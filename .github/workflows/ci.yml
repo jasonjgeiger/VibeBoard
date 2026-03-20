@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main, 'claude/**']
+  pull_request:
+    branches: [main]
+
+env:
+  DOTNET_VERSION: '8.0.x'
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        platform: [x64]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore
+        run: dotnet restore CopilotTerminalFeed.sln -p:Platform=${{ matrix.platform }}
+
+      - name: Build
+        run: dotnet build CopilotTerminalFeed.sln -c Release -p:Platform=${{ matrix.platform }} --no-restore
+
+      - name: Test
+        run: dotnet test tests/CopilotTerminalFeed.Tests/CopilotTerminalFeed.Tests.csproj -c Release -p:Platform=${{ matrix.platform }} --no-build --verbosity normal --logger "trx;LogFileName=test-results.trx"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.platform }}
+          path: '**/test-results.trx'

@@ -109,7 +109,7 @@ public sealed class WebSocketHandler
         }
         catch (JsonException ex)
         {
-            Console.Error.WriteLine($"Invalid WebSocket message: {ex.Message}");
+            Log.Warn($"Invalid WebSocket message: {ex.Message}");
         }
     }
 

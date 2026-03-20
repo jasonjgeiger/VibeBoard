@@ -5,6 +5,7 @@
  *   - Session tabs (multiple concurrent terminals)
  *   - WebSocket reconnection with exponential backoff
  *   - Auth token from URL query param, forwarded on API/WS requests
+ *   - Clipboard integration (Ctrl+Shift+C/V)
  *   - Graceful error messages for missing commands
  */
 (function () {
@@ -17,7 +18,7 @@
   var container = document.getElementById('terminal-container');
   var tabBar = document.getElementById('tab-bar');
 
-  var sessions = {};       // { id: { terminal, fitAddon, ws, command, reconnectAttempts, reconnectTimer } }
+  var sessions = {};
   var activeSessionId = null;
   var tabCounter = 0;
 
@@ -25,10 +26,6 @@
 
   function authHeaders() {
     return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + AUTH_TOKEN };
-  }
-
-  function authQueryParam() {
-    return 'token=' + encodeURIComponent(AUTH_TOKEN);
   }
 
   // ── Terminal creation ───────────────────────────────────────────
@@ -39,6 +36,7 @@
       cursorStyle: 'bar',
       fontSize: 14,
       fontFamily: "'Cascadia Code', 'Consolas', 'Courier New', monospace",
+      scrollback: 5000,
       theme: {
         background: '#1e1e2e',
         foreground: '#cdd6f4',
@@ -67,6 +65,28 @@
     var fit = new window.FitAddon.FitAddon();
     term.loadAddon(fit);
     term.loadAddon(new window.WebLinksAddon.WebLinksAddon());
+
+    // Clipboard: Ctrl+Shift+C to copy, Ctrl+Shift+V to paste
+    term.attachCustomKeyEventHandler(function (ev) {
+      if (ev.ctrlKey && ev.shiftKey && ev.type === 'keydown') {
+        if (ev.key === 'C') {
+          var sel = term.getSelection();
+          if (sel) {
+            navigator.clipboard.writeText(sel).catch(function () {});
+          }
+          return false;
+        }
+        if (ev.key === 'V') {
+          navigator.clipboard.readText().then(function (text) {
+            if (text && activeSessionId) {
+              sendInput(sessions[activeSessionId], text);
+            }
+          }).catch(function () {});
+          return false;
+        }
+      }
+      return true;
+    });
 
     return { terminal: term, fitAddon: fit };
   }
@@ -113,7 +133,6 @@
       })
       .catch(function (err) {
         setStatus(err.message, 'error');
-        // Show error in active terminal if any
         if (activeSessionId && sessions[activeSessionId]) {
           sessions[activeSessionId].terminal.writeln('\r\n\x1b[31mError: ' + err.message + '\x1b[0m');
         }
@@ -129,7 +148,6 @@
     session.terminal.dispose();
     delete sessions[id];
 
-    // Tell server to clean up
     fetch(BASE_URL + '/api/session/destroy', {
       method: 'POST',
       headers: authHeaders(),
@@ -138,7 +156,6 @@
 
     removeTab(id);
 
-    // Switch to another session or show empty state
     var remaining = Object.keys(sessions);
     if (remaining.length > 0) {
       switchToSession(remaining[remaining.length - 1]);
@@ -162,7 +179,6 @@
 
     activeSessionId = id;
 
-    // If terminal not yet attached, attach it
     if (!session.terminal.element) {
       session.terminal.open(container);
     }
@@ -183,13 +199,12 @@
   // ── WebSocket with reconnection ─────────────────────────────────
 
   var MAX_RECONNECT_ATTEMPTS = 8;
-  var BASE_RECONNECT_DELAY = 500; // ms
+  var BASE_RECONNECT_DELAY = 500;
 
   function connectWebSocket(session) {
     if (session.exited) return;
 
-    var url = session.wsUrl;
-    session.ws = new WebSocket(url);
+    session.ws = new WebSocket(session.wsUrl);
 
     session.ws.onopen = function () {
       session.reconnectAttempts = 0;
@@ -202,7 +217,6 @@
         var msg = JSON.parse(event.data);
         if (msg.type === 'output') {
           var raw = atob(msg.data);
-          // Convert binary string to Uint8Array for proper UTF-8 handling
           var bytes = new Uint8Array(raw.length);
           for (var i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
           session.terminal.write(bytes);
@@ -225,15 +239,13 @@
       scheduleReconnect(session);
     };
 
-    session.ws.onerror = function () {
-      // onclose will fire after this
-    };
+    session.ws.onerror = function () {};
   }
 
   function scheduleReconnect(session) {
     if (session.exited || session.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
       if (!session.exited) {
-        session.terminal.writeln('\r\n\x1b[31m[Connection lost. Click to retry.]\x1b[0m');
+        session.terminal.writeln('\r\n\x1b[31m[Connection lost. Press any key to retry.]\x1b[0m');
         session.terminal.onData(function () {
           session.reconnectAttempts = 0;
           connectWebSocket(session);
@@ -243,7 +255,7 @@
     }
 
     var delay = BASE_RECONNECT_DELAY * Math.pow(2, session.reconnectAttempts);
-    delay = Math.min(delay, 30000); // cap at 30s
+    delay = Math.min(delay, 30000);
     session.reconnectAttempts++;
 
     if (activeSessionId === session.id) {
@@ -273,7 +285,7 @@
 
   function addTab(id, command) {
     tabCounter++;
-    var label = command.split(/[\\/]/).pop().split('.')[0]; // "cmd.exe" -> "cmd"
+    var label = command.split(/[\\/]/).pop().split('.')[0];
     if (label === 'gh') label = 'copilot';
 
     var tab = document.createElement('div');
@@ -291,7 +303,6 @@
       destroySession(id);
     });
 
-    // Insert before the "+" button
     var addBtn = tabBar.querySelector('.tab-add');
     tabBar.insertBefore(tab, addBtn);
   }
@@ -334,6 +345,19 @@
 
   document.querySelector('.tab-add').addEventListener('click', function () {
     startSession('cmd.exe');
+  });
+
+  // ── Keyboard shortcut: Ctrl+T for new tab ───────────────────────
+
+  document.addEventListener('keydown', function (e) {
+    if (e.ctrlKey && e.key === 't') {
+      e.preventDefault();
+      startSession('cmd.exe');
+    }
+    if (e.ctrlKey && e.key === 'w') {
+      e.preventDefault();
+      if (activeSessionId) destroySession(activeSessionId);
+    }
   });
 
   // ── Initialize ──────────────────────────────────────────────────

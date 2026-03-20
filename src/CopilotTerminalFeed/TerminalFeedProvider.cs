@@ -1,3 +1,4 @@
+using System.Text.Json;
 using CopilotTerminalFeed.Server;
 using Microsoft.Windows.Widgets.Feeds;
 using Microsoft.Windows.Widgets.Feeds.Providers;
@@ -15,6 +16,13 @@ public sealed class TerminalFeedProvider : IFeedProvider
     private FeedProviderInfo? _providerInfo;
     private bool _enabled;
 
+    private static readonly Dictionary<string, string> VerbToCommand = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["launch_claude"] = "claude",
+        ["launch_copilot"] = "gh copilot",
+        ["launch_shell"] = "cmd.exe",
+    };
+
     public TerminalFeedProvider(TerminalServer server)
     {
         _server = server;
@@ -24,46 +32,70 @@ public sealed class TerminalFeedProvider : IFeedProvider
     {
         _providerInfo = args.FeedProviderInfo;
         _enabled = true;
-        Console.WriteLine($"Feed provider enabled: {_providerInfo.Id}");
+        Log.Info($"Feed provider enabled: {_providerInfo.Id}");
     }
 
     public void OnFeedProviderDisabled(FeedProviderDisabledArgs args)
     {
         _enabled = false;
-        Console.WriteLine("Feed provider disabled");
+        Log.Info("Feed provider disabled");
     }
 
     public void OnFeedEnabled(FeedEnabledArgs args)
     {
-        Console.WriteLine("Feed enabled, preparing terminal card");
+        Log.Info("Feed enabled, preparing terminal card");
         SendFeedUpdate();
     }
 
     public void OnFeedDisabled(FeedDisabledArgs args)
     {
-        Console.WriteLine("Feed disabled");
+        Log.Info("Feed disabled");
     }
 
     public void OnCustomQueryReceived(CustomQueryReceivedArgs args)
     {
-        var query = args.CustomQueryData;
-        Console.WriteLine($"Custom query received: {query}");
+        var queryData = args.CustomQueryData;
+        Log.Info($"Custom query received: {queryData}");
 
         try
         {
-            if (query.Contains("launch_claude"))
+            // Extract verb from the Adaptive Card Action.Execute payload
+            var verb = ExtractVerb(queryData);
+            if (verb is not null && VerbToCommand.TryGetValue(verb, out var command))
             {
-                _server.CreateSession("claude");
+                _server.CreateSession(command);
             }
-            else if (query.Contains("launch_copilot"))
+            else
             {
-                _server.CreateSession("gh copilot");
+                Log.Warn($"Unknown verb: {verb ?? "(null)"}");
             }
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Failed to handle custom query: {ex.Message}");
+            Log.Error("Failed to handle custom query", ex);
         }
+    }
+
+    /// <summary>
+    /// Extracts the Action.Execute verb from the custom query data.
+    /// The Widget Board sends JSON like {"verb":"launch_claude"} or the raw verb string.
+    /// </summary>
+    private static string? ExtractVerb(string data)
+    {
+        if (string.IsNullOrWhiteSpace(data)) return null;
+
+        // Try JSON first
+        try
+        {
+            using var doc = JsonDocument.Parse(data);
+            if (doc.RootElement.TryGetProperty("verb", out var verbProp))
+                return verbProp.GetString();
+        }
+        catch (JsonException) { }
+
+        // Fall back to treating the whole string as the verb
+        var trimmed = data.Trim();
+        return trimmed.Length > 0 ? trimmed : null;
     }
 
     private void SendFeedUpdate()

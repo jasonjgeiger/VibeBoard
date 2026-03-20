@@ -44,7 +44,7 @@ public sealed class ServerConfig
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Failed to load config from {ConfigPath}: {ex.Message}");
+            Log.Error($"Failed to load config from {ConfigPath}", ex);
         }
 
         return new ServerConfig();
