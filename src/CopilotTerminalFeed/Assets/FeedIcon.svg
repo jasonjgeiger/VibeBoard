@@ -1,4 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="10" fill="#1e1e2e"/>
-  <text x="32" y="39" font-family="Consolas,monospace" font-size="24" font-weight="bold" fill="#89b4fa" text-anchor="middle">>_</text>
+  <rect width="64" height="64" rx="12" fill="#1e1e2e"/>
+  <rect x="6" y="6" width="52" height="52" rx="8" fill="none" stroke="#313244" stroke-width="1.5"/>
+  <!-- Title bar dots -->
+  <circle cx="16" cy="16" r="2.5" fill="#f38ba8"/>
+  <circle cx="24" cy="16" r="2.5" fill="#f9e2af"/>
+  <circle cx="32" cy="16" r="2.5" fill="#a6e3a1"/>
+  <!-- Terminal prompt -->
+  <text x="16" y="34" font-family="Consolas,monospace" font-size="14" font-weight="bold" fill="#89b4fa">$</text>
+  <rect x="26" y="26" width="22" height="10" rx="2" fill="#45475a"/>
+  <!-- Cursor -->
+  <rect x="16" y="40" width="7" height="12" rx="1" fill="#f5e0dc" opacity="0.8"/>
 </svg>

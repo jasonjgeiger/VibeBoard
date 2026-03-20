@@ -394,8 +394,11 @@
     var tab = document.createElement('div');
     tab.className = 'tab';
     tab.dataset.session = id;
+    tab.setAttribute('role', 'tab');
+    tab.setAttribute('aria-label', label + ' terminal session');
+    tab.setAttribute('tabindex', '0');
     tab.innerHTML = '<span class="tab-label">' + escapeHtml(label) + '</span>' +
-                    '<span class="tab-close" title="Close">&times;</span>';
+                    '<span class="tab-close" title="Close" aria-label="Close tab">&times;</span>';
 
     tab.querySelector('.tab-label').addEventListener('click', function () {
       switchToSession(id);
@@ -431,6 +434,8 @@
     document.getElementById('setting-scrollback').value = settings.scrollback;
     document.getElementById('setting-cursor').value = settings.cursorStyle;
     settingsOverlay.classList.remove('hidden');
+    // Focus the first input for keyboard accessibility
+    document.getElementById('setting-fontsize').focus();
   }
 
   function closeSettings() {
@@ -439,6 +444,21 @@
       sessions[activeSessionId].terminal.focus();
     }
   }
+
+  // Focus trapping inside the settings modal
+  settingsOverlay.addEventListener('keydown', function (e) {
+    if (e.key !== 'Tab') return;
+    var panel = settingsOverlay.querySelector('.settings-panel');
+    var focusable = panel.querySelectorAll('input, select, button, [tabindex]:not([tabindex="-1"])');
+    if (focusable.length === 0) return;
+    var first = focusable[0];
+    var last = focusable[focusable.length - 1];
+    if (e.shiftKey) {
+      if (document.activeElement === first) { e.preventDefault(); last.focus(); }
+    } else {
+      if (document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+  });
 
   function applySettings() {
     settings.fontSize = parseInt(document.getElementById('setting-fontsize').value, 10) || 14;

@@ -70,6 +70,9 @@
                     Description="Interactive terminal powered by Claude Code and GitHub Copilot">
                     <Capabilities>
                       <Capability>
+                        <Size Name="Medium" />
+                      </Capability>
+                      <Capability>
                         <Size Name="Large" />
                       </Capability>
                     </Capabilities>

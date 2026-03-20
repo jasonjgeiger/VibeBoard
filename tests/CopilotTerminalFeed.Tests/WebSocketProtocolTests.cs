@@ -48,11 +48,34 @@ public class WebSocketProtocolTests
     }
 
     [Fact]
-    public void Exit_Message_Is_Simple()
+    public void Exit_Message_Includes_Code()
     {
-        var msg = "{\"type\":\"exit\"}";
+        var msg = "{\"type\":\"exit\",\"code\":0}";
         using var doc = JsonDocument.Parse(msg);
         Assert.Equal("exit", doc.RootElement.GetProperty("type").GetString());
+        Assert.Equal(0, doc.RootElement.GetProperty("code").GetInt32());
+    }
+
+    [Fact]
+    public void Exit_Message_With_Nonzero_Code()
+    {
+        var msg = "{\"type\":\"exit\",\"code\":1}";
+        using var doc = JsonDocument.Parse(msg);
+        Assert.Equal("exit", doc.RootElement.GetProperty("type").GetString());
+        Assert.Equal(1, doc.RootElement.GetProperty("code").GetInt32());
+    }
+
+    [Fact]
+    public void Replay_Message_Data_Is_Valid_Base64()
+    {
+        var original = "previous output\r\n"u8.ToArray();
+        var base64 = Convert.ToBase64String(original);
+        var msg = $"{{\"type\":\"replay\",\"data\":\"{base64}\"}}";
+
+        using var doc = JsonDocument.Parse(msg);
+        Assert.Equal("replay", doc.RootElement.GetProperty("type").GetString());
+        var decoded = Convert.FromBase64String(doc.RootElement.GetProperty("data").GetString()!);
+        Assert.Equal(original, decoded);
     }
 
     [Fact]

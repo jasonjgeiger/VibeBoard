@@ -1,4 +1,17 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="310" height="150" viewBox="0 0 310 150">
   <rect width="310" height="150" rx="16" fill="#1e1e2e"/>
-  <text x="155" y="88" font-family="Consolas,monospace" font-size="54" font-weight="bold" fill="#89b4fa" text-anchor="middle">>_ Copilot Terminal</text>
+  <rect x="12" y="12" width="286" height="126" rx="12" fill="none" stroke="#313244" stroke-width="2"/>
+  <!-- Title bar -->
+  <rect x="12" y="12" width="286" height="28" rx="12" fill="#181825"/>
+  <circle cx="28" cy="26" r="4" fill="#f38ba8"/>
+  <circle cx="40" cy="26" r="4" fill="#f9e2af"/>
+  <circle cx="52" cy="26" r="4" fill="#a6e3a1"/>
+  <text x="75" y="30" font-family="Segoe UI,sans-serif" font-size="13" fill="#6c7086">Copilot Terminal</text>
+  <!-- Terminal lines -->
+  <text x="24" y="64" font-family="Consolas,monospace" font-size="14" fill="#89b4fa">$</text>
+  <text x="38" y="64" font-family="Consolas,monospace" font-size="14" fill="#cdd6f4">claude "help me build"</text>
+  <text x="24" y="84" font-family="Consolas,monospace" font-size="14" fill="#a6e3a1">&#x2713;</text>
+  <rect x="38" y="72" width="200" height="14" rx="3" fill="#45475a" opacity="0.5"/>
+  <text x="24" y="108" font-family="Consolas,monospace" font-size="14" fill="#89b4fa">$</text>
+  <rect x="38" y="96" width="8" height="14" rx="2" fill="#f5e0dc" opacity="0.8"/>
 </svg>
