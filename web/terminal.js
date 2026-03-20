@@ -317,15 +317,16 @@
     session.ws.onmessage = function (event) {
       try {
         var msg = JSON.parse(event.data);
-        if (msg.type === 'output') {
+        if (msg.type === 'output' || msg.type === 'replay') {
           var raw = atob(msg.data);
           var bytes = new Uint8Array(raw.length);
           for (var i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
           session.terminal.write(bytes);
         } else if (msg.type === 'exit') {
           session.exited = true;
-          if (activeSessionId === session.id) setStatus('Process exited', '');
-          session.terminal.writeln('\r\n\x1b[33m[Process exited. Press any key to close tab.]\x1b[0m');
+          var codeStr = typeof msg.code === 'number' ? ' (code ' + msg.code + ')' : '';
+          if (activeSessionId === session.id) setStatus('Process exited' + codeStr, '');
+          session.terminal.writeln('\r\n\x1b[33m[Process exited' + codeStr + '. Press any key to close tab.]\x1b[0m');
           session.terminal.onData(function () { destroySession(session.id); });
         } else if (msg.type === 'error') {
           session.terminal.writeln('\r\n\x1b[31mServer error: ' + (msg.message || 'unknown') + '\x1b[0m');

@@ -8,43 +8,43 @@
   <link rel="stylesheet" href="terminal.css">
 </head>
 <body>
-  <div id="toolbar">
-    <span class="title">Copilot Terminal</span>
+  <nav id="toolbar" role="toolbar" aria-label="Terminal actions">
+    <span class="title" aria-hidden="true">Copilot Terminal</span>
     <div class="actions">
-      <button id="btn-claude" class="cmd-btn" data-command="claude">Claude</button>
-      <button id="btn-copilot" class="cmd-btn" data-command="gh copilot">Copilot</button>
-      <button id="btn-shell" class="cmd-btn" data-command="cmd.exe">Shell</button>
-      <button id="btn-settings" class="cmd-btn cmd-btn--icon" title="Settings">&#9881;</button>
+      <button id="btn-claude" class="cmd-btn" data-command="claude" aria-label="Open Claude session">Claude</button>
+      <button id="btn-copilot" class="cmd-btn" data-command="gh copilot" aria-label="Open Copilot session">Copilot</button>
+      <button id="btn-shell" class="cmd-btn" data-command="cmd.exe" aria-label="Open shell session">Shell</button>
+      <button id="btn-settings" class="cmd-btn cmd-btn--icon" title="Settings" aria-label="Open settings">&#9881;</button>
     </div>
+  </nav>
+  <div id="tab-bar" role="tablist" aria-label="Terminal sessions">
+    <button class="tab-add" title="New tab (Ctrl+T)" aria-label="New tab">+</button>
   </div>
-  <div id="tab-bar">
-    <div class="tab-add" title="New tab (Ctrl+T)">+</div>
-  </div>
-  <div id="terminal-container"></div>
+  <main id="terminal-container" role="region" aria-label="Terminal output"></main>
 
   <!-- Search bar (hidden by default, toggled with Ctrl+F) -->
-  <div id="search-bar" class="search-bar hidden">
-    <input id="search-input" type="text" placeholder="Search..." spellcheck="false" autocomplete="off">
-    <button id="search-prev" class="search-btn" title="Previous (Shift+Enter)">&#9650;</button>
-    <button id="search-next" class="search-btn" title="Next (Enter)">&#9660;</button>
-    <button id="search-close" class="search-btn" title="Close (Esc)">&times;</button>
+  <div id="search-bar" class="search-bar hidden" role="search" aria-label="Search terminal">
+    <input id="search-input" type="text" placeholder="Search..." spellcheck="false" autocomplete="off" aria-label="Search text">
+    <button id="search-prev" class="search-btn" title="Previous (Shift+Enter)" aria-label="Previous match">&#9650;</button>
+    <button id="search-next" class="search-btn" title="Next (Enter)" aria-label="Next match">&#9660;</button>
+    <button id="search-close" class="search-btn" title="Close (Esc)" aria-label="Close search">&times;</button>
   </div>
 
   <!-- Settings panel (hidden by default) -->
-  <div id="settings-overlay" class="settings-overlay hidden">
+  <div id="settings-overlay" class="settings-overlay hidden" role="dialog" aria-modal="true" aria-label="Settings">
     <div class="settings-panel">
       <div class="settings-header">
-        <span>Settings</span>
-        <button id="settings-close" class="search-btn">&times;</button>
+        <span id="settings-title">Settings</span>
+        <button id="settings-close" class="search-btn" aria-label="Close settings">&times;</button>
       </div>
-      <div class="settings-body">
+      <div class="settings-body" role="form" aria-labelledby="settings-title">
         <label class="settings-row">
           <span>Font Size</span>
-          <input id="setting-fontsize" type="number" min="8" max="32" value="14">
+          <input id="setting-fontsize" type="number" min="8" max="32" value="14" aria-label="Font size">
         </label>
         <label class="settings-row">
           <span>Default Shell</span>
-          <select id="setting-shell">
+          <select id="setting-shell" aria-label="Default shell">
             <option value="cmd.exe">cmd.exe</option>
             <option value="powershell.exe">PowerShell</option>
             <option value="pwsh.exe">PowerShell 7</option>
@@ -53,11 +53,11 @@
         </label>
         <label class="settings-row">
           <span>Scrollback Lines</span>
-          <input id="setting-scrollback" type="number" min="500" max="50000" step="500" value="5000">
+          <input id="setting-scrollback" type="number" min="500" max="50000" step="500" value="5000" aria-label="Scrollback lines">
         </label>
         <label class="settings-row">
           <span>Cursor Style</span>
-          <select id="setting-cursor">
+          <select id="setting-cursor" aria-label="Cursor style">
             <option value="bar">Bar</option>
             <option value="block">Block</option>
             <option value="underline">Underline</option>
@@ -65,15 +65,15 @@
         </label>
       </div>
       <div class="settings-footer">
-        <button id="settings-save" class="cmd-btn">Save</button>
+        <button id="settings-save" class="cmd-btn" aria-label="Save settings">Save</button>
       </div>
     </div>
   </div>
 
-  <div id="status-bar">
+  <footer id="status-bar" role="status" aria-live="polite">
     <span id="status-text">Disconnected</span>
-    <span id="session-id"></span>
-  </div>
+    <span id="session-id" aria-label="Session ID"></span>
+  </footer>
 
   <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>

@@ -12,8 +12,9 @@ namespace CopilotTerminalFeed.Server;
 ///   Client -> Server: {"type":"input","data":"..."} — keyboard input
 ///   Client -> Server: {"type":"resize","cols":N,"rows":N} — terminal resize
 ///   Server -> Client: {"type":"output","data":"..."} — terminal output (base64)
-///   Server -> Client: {"type":"exit"} — process exited
+///   Server -> Client: {"type":"exit","code":N} — process exited with code
 ///   Server -> Client: {"type":"error","message":"..."} — error message
+///   Server -> Client: {"type":"replay","data":"..."} — buffered output replay (base64)
 /// </summary>
 public sealed class WebSocketHandler
 {
@@ -21,6 +22,7 @@ public sealed class WebSocketHandler
     private readonly ConPtySession _session;
     private readonly Action? _onActivity;
     private readonly SemaphoreSlim _sendLock = new(1, 1);
+    private CancellationToken _ct;
 
     public WebSocketHandler(WebSocket webSocket, ConPtySession session, Action? onActivity = null)
     {
@@ -31,11 +33,15 @@ public sealed class WebSocketHandler
 
     public async Task RunAsync(CancellationToken ct)
     {
+        _ct = ct;
         _session.OutputReceived += OnPtyOutput;
         _session.ProcessExited += OnProcessExited;
 
         try
         {
+            // Send buffered output so the client sees recent history
+            await SendReplayBuffer();
+
             await ReceiveLoop(ct);
         }
         finally
@@ -44,6 +50,21 @@ public sealed class WebSocketHandler
             _session.ProcessExited -= OnProcessExited;
             _sendLock.Dispose();
         }
+    }
+
+    private async Task SendReplayBuffer()
+    {
+        var replay = _session.GetReplayBuffer();
+        if (replay.Length == 0) return;
+
+        try
+        {
+            var base64 = Convert.ToBase64String(replay);
+            var message = $"{{\"type\":\"replay\",\"data\":\"{base64}\"}}";
+            await SendMessageAsync(message);
+        }
+        catch (WebSocketException) { }
+        catch (ObjectDisposedException) { }
     }
 
     private async Task ReceiveLoop(CancellationToken ct)
@@ -113,11 +134,17 @@ public sealed class WebSocketHandler
         }
     }
 
-    private async void OnPtyOutput(byte[] data)
+    private void OnPtyOutput(byte[] data)
     {
         if (_webSocket.State != WebSocketState.Open) return;
         _onActivity?.Invoke();
 
+        // Fire-and-forget but with error handling — avoid async void
+        _ = SendOutputSafe(data);
+    }
+
+    private async Task SendOutputSafe(byte[] data)
+    {
         try
         {
             var base64 = Convert.ToBase64String(data);
@@ -125,29 +152,44 @@ public sealed class WebSocketHandler
             await SendMessageAsync(message);
         }
         catch (WebSocketException) { }
+        catch (ObjectDisposedException) { }
+        catch (Exception ex)
+        {
+            Log.Error("Unexpected error sending PTY output to WebSocket", ex);
+        }
     }
 
-    private async void OnProcessExited()
+    private void OnProcessExited(int exitCode)
     {
         if (_webSocket.State != WebSocketState.Open) return;
 
+        _ = SendExitSafe(exitCode);
+    }
+
+    private async Task SendExitSafe(int exitCode)
+    {
         try
         {
-            await SendMessageAsync("{\"type\":\"exit\"}");
+            await SendMessageAsync($"{{\"type\":\"exit\",\"code\":{exitCode}}}");
         }
         catch (WebSocketException) { }
+        catch (ObjectDisposedException) { }
+        catch (Exception ex)
+        {
+            Log.Error("Unexpected error sending exit message to WebSocket", ex);
+        }
     }
 
     /// <summary>Thread-safe WebSocket send with a semaphore to prevent concurrent writes.</summary>
     private async Task SendMessageAsync(string message)
     {
-        await _sendLock.WaitAsync();
+        await _sendLock.WaitAsync(_ct);
         try
         {
             if (_webSocket.State == WebSocketState.Open)
             {
                 var bytes = Encoding.UTF8.GetBytes(message);
-                await _webSocket.SendAsync(bytes, WebSocketMessageType.Text, true, CancellationToken.None);
+                await _webSocket.SendAsync(bytes, WebSocketMessageType.Text, true, _ct);
             }
         }
         finally

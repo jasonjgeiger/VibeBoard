@@ -20,11 +20,16 @@ public sealed class ConPtySession : IDisposable
     private SafeProcessHandle? _processHandle;
     private Stream? _readStream;
     private Stream? _writeStream;
+    private Task? _readTask;
     private bool _disposed;
 
+    /// <summary>Ring buffer of recent output for replay on reconnect.</summary>
+    private readonly OutputRingBuffer _outputBuffer = new(capacity: 64 * 1024);
+
     public event Action<byte[]>? OutputReceived;
-    public event Action? ProcessExited;
+    public event Action<int>? ProcessExited;
     public bool IsRunning { get; private set; }
+    public int? ExitCode { get; private set; }
 
     public ConPtySession(string command = "cmd.exe")
     {
@@ -54,8 +59,8 @@ public sealed class ConPtySession : IDisposable
 
         IsRunning = true;
 
-        // Start reading output in a background task
-        _ = Task.Run(ReadOutputLoop);
+        // Start reading output in a tracked background task
+        _readTask = Task.Run(ReadOutputLoop);
     }
 
     /// <summary>
@@ -77,6 +82,11 @@ public sealed class ConPtySession : IDisposable
         var size = new COORD { X = columns, Y = rows };
         ResizePseudoConsole(_pseudoConsoleHandle, size);
     }
+
+    /// <summary>
+    /// Returns recent terminal output for replay when a new client connects.
+    /// </summary>
+    public byte[] GetReplayBuffer() => _outputBuffer.ToArray();
 
     public void Dispose()
     {
@@ -148,6 +158,8 @@ public sealed class ConPtySession : IDisposable
     private async Task ReadOutputLoop()
     {
         var buffer = new byte[4096];
+        int exitCode = -1;
+
         try
         {
             while (!_disposed && _readStream is not null)
@@ -157,6 +169,8 @@ public sealed class ConPtySession : IDisposable
 
                 var data = new byte[bytesRead];
                 Buffer.BlockCopy(buffer, 0, data, 0, bytesRead);
+
+                _outputBuffer.Write(data);
                 OutputReceived?.Invoke(data);
             }
         }
@@ -165,7 +179,20 @@ public sealed class ConPtySession : IDisposable
         finally
         {
             IsRunning = false;
-            ProcessExited?.Invoke();
+
+            // Try to get the process exit code
+            try
+            {
+                if (_processHandle is not null && !_processHandle.IsInvalid &&
+                    GetExitCodeProcess(_processHandle.DangerousGetHandle(), out var code))
+                {
+                    exitCode = (int)code;
+                }
+            }
+            catch { }
+
+            ExitCode = exitCode;
+            ProcessExited?.Invoke(exitCode);
         }
     }
 
@@ -247,5 +274,62 @@ public sealed class ConPtySession : IDisposable
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool CloseHandle(IntPtr hObject);
 
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GetExitCodeProcess(IntPtr hProcess, out uint lpExitCode);
+
     #endregion
+}
+
+/// <summary>
+/// Thread-safe ring buffer for terminal output. Stores the last N bytes
+/// of output so new WebSocket connections can replay recent content.
+/// </summary>
+internal sealed class OutputRingBuffer
+{
+    private readonly byte[] _buffer;
+    private int _head;
+    private int _count;
+    private readonly object _lock = new();
+
+    public OutputRingBuffer(int capacity)
+    {
+        _buffer = new byte[capacity];
+    }
+
+    public void Write(byte[] data)
+    {
+        lock (_lock)
+        {
+            foreach (var b in data)
+            {
+                _buffer[_head] = b;
+                _head = (_head + 1) % _buffer.Length;
+                if (_count < _buffer.Length) _count++;
+            }
+        }
+    }
+
+    public byte[] ToArray()
+    {
+        lock (_lock)
+        {
+            if (_count == 0) return Array.Empty<byte>();
+
+            var result = new byte[_count];
+            var start = (_head - _count + _buffer.Length) % _buffer.Length;
+
+            if (start + _count <= _buffer.Length)
+            {
+                Buffer.BlockCopy(_buffer, start, result, 0, _count);
+            }
+            else
+            {
+                var firstPart = _buffer.Length - start;
+                Buffer.BlockCopy(_buffer, start, result, 0, firstPart);
+                Buffer.BlockCopy(_buffer, 0, result, firstPart, _count - firstPart);
+            }
+
+            return result;
+        }
+    }
 }

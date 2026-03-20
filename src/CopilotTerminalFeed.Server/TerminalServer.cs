@@ -141,7 +141,7 @@ public sealed class TerminalServer
         }
 
         // Wire up process exit to mark the entry as dead
-        session.ProcessExited += () => entry.MarkExited();
+        session.ProcessExited += (_) => entry.MarkExited();
 
         Log.Info($"Created session {sessionId} for command: {resolvedCommand}");
         return sessionId;
